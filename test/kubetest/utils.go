@@ -436,55 +436,8 @@ func CreateMutatingWebhookConfiguration(k8s *K8s, certPem []byte, name, namespac
 
 // CreateAdmissionWebhookDeployment - Setup Admission Webhook deoloyment
 func CreateAdmissionWebhookDeployment(k8s *K8s, name, image, namespace string) *appsv1.Deployment {
-	deployment := &appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
-			Labels: map[string]string{
-				"app": "nsm-admission-webhook",
-			},
-		},
-		TypeMeta: metav1.TypeMeta{
-			Kind: "Deployment",
-		},
-		Spec: appsv1.DeploymentSpec{
-			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{"app": "nsm-admission-webhook"},
-			},
-			Template: v1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						"app": "nsm-admission-webhook",
-					},
-				},
-				Spec: v1.PodSpec{
-					Containers: []v1.Container{
-						{
-							Name:            name,
-							Image:           image,
-							ImagePullPolicy: v1.PullIfNotPresent,
-							VolumeMounts: []v1.VolumeMount{
-								{
-									Name:      "webhook-certs",
-									MountPath: "/etc/webhook/certs",
-									ReadOnly:  true,
-								},
-							},
-						},
-					},
-					Volumes: []v1.Volume{
-						{
-							Name: "webhook-certs",
-							VolumeSource: v1.VolumeSource{
-								Secret: &v1.SecretVolumeSource{
-									SecretName: "nsm-admission-webhook-certs",
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
+	deployment := pods.AdmissionWebhookDeployment(name, image)
+
 	awDeployment, err := k8s.CreateDeployment(deployment, namespace)
 	Expect(err).To(BeNil())
 
@@ -657,7 +610,7 @@ func HealNscChecker(k8s *K8s, nscPod *v1.Pod) *NSCCheckInfo {
 			rv = info
 			break
 		}
-		<-time.After(300 * time.Millisecond)
+		<-time.After(time.Second)
 	}
 	Expect(success).To(BeTrue())
 	return rv
@@ -774,4 +727,23 @@ func PrepareRegistryClients(k8s *K8s, nsmd *v1.Pod) (registry.NetworkServiceRegi
 	Expect(err).To(BeNil())
 
 	return nseRegistryClient, nsmRegistryClient, closeFunc
+}
+
+// ExpectNSEsCountToBe checks if nses count becomes 'countExpected' after a time
+func ExpectNSEsCountToBe(k8s *K8s, countWas, countExpected int) {
+	if countWas == countExpected {
+		<-time.After(10 * time.Second)
+	} else {
+		for i := 0; i < 10; i++ {
+			if nses, err := k8s.GetNSEs(); err == nil && len(nses) == countExpected {
+				break
+			}
+			<-time.After(1 * time.Second)
+		}
+	}
+
+	nses, err := k8s.GetNSEs()
+
+	Expect(err).To(BeNil())
+	Expect(len(nses)).To(Equal(countExpected), fmt.Sprint(nses))
 }
